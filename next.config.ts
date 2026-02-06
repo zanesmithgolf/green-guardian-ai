@@ -1,10 +1,11 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  turbopack: {},  // Empty to silence Turbopack error
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.fallback = {
-        ...config.resolve.fallback || {},  // Handle if fallback is undefined
+        ...config.resolve.fallback || {},
         fs: false,
         path: false,
         os: false,
