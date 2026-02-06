@@ -22,25 +22,28 @@ export default function Dashboard() {
         if (lat && lon) {
           isGPS = true;
         } else {
-          // Geocode zip if no lat/lon
-          const geocodeUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${zip}&country=US&count=1&language=en&format=json`;
+          // Geocode zip using Nominatim (OpenStreetMap) for accurate US results
+          const geocodeUrl = `https://nominatim.openstreetmap.org/search?postalcode=${zip}&country=US&format=json&limit=1`;
           const geocodeResponse = await axios.get(geocodeUrl);
-          if (!geocodeResponse.data.results || geocodeResponse.data.results.length === 0) {
+          if (!geocodeResponse.data || geocodeResponse.data.length === 0) {
             throw new Error('No location found for the zip code');
           }
-          lat = geocodeResponse.data.results[0].latitude;
-          lon = geocodeResponse.data.results[0].longitude;
-          const city = geocodeResponse.data.results[0].name;
-          const state = geocodeResponse.data.results[0].admin1;
-          setLocationName(`${city}, ${state}`);
+          lat = geocodeResponse.data[0].lat;
+          lon = geocodeResponse.data[0].lon;
+          const displayName = geocodeResponse.data[0].display_name;
+          setLocationName(displayName.split(', ').slice(0, 2).join(', ')); // e.g., "Alpharetta, Georgia"
         }
 
         if (isGPS) {
           setLocationName('Current Location');
         }
 
+        // Get current date for forecast
+        const today = new Date().toISOString().split('T')[0];
+        const tomorrow = new Date(new Date().getTime() + 86400000).toISOString().split('T')[0]; // +1 day
+
         // Fetch weather with lat/lon
-        const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&start_date=2026-02-02&end_date=2026-02-03&hourly=soil_temperature_0cm,temperature_2m,dewpoint_2m,relative_humidity_2m,wind_speed_10m,cloudcover,precipitation`;
+        const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&start_date=${today}&end_date=${tomorrow}&hourly=soil_temperature_0cm,temperature_2m,dewpoint_2m,relative_humidity_2m,wind_speed_10m,cloudcover,precipitation`;
         const weatherResponse = await axios.get(weatherUrl);
         setData(weatherResponse.data.hourly);
       } catch (err) {
