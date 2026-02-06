@@ -1,7 +1,7 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  turbopack: {},  // Empty to silence the Turbopack error
+  turbopack: {},  // Empty to silence Turbopack
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.fallback = {
