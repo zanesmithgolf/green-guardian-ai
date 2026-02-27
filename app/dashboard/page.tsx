@@ -32,7 +32,7 @@ import {
   ResponsiveContainer
 } from 'recharts';
 
-// Mock data – guaranteed array shape
+// Mock fallback – guaranteed array
 const mockTempData = [
   { time: '12 AM', air: 28, soil: 38 },
   { time: '2 AM', air: 26, soil: 36 },
@@ -52,84 +52,78 @@ export default function Dashboard() {
   const searchParams = useSearchParams();
   const zip = searchParams.get('zip') || '30004';
 
-  const [realData, setRealData] = useState<any>(null);
+  const [hourly, setHourly] = useState<any[]>([]); // always array
   const [locationName, setLocationName] = useState('Loading location...');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        console.log('[FETCH] Starting for ZIP:', zip);
-
-        let lat: number;
-        let lon: number;
+        console.log('[START] Fetching for ZIP:', zip);
 
         // Nominatim geocoding
         const geocodeUrl = `https://nominatim.openstreetmap.org/search?postalcode=${zip}&countrycodes=us&format=json&limit=1`;
-        const geocodeRes = await axios.get(geocodeUrl);
-        console.log('[GEOCODE] Response:', geocodeRes.data);
+        const geocodeRes = await axios.get(geocodeUrl, {
+          headers: { 'User-Agent': 'GreenGuardian/1.0 (contact@zanesmithgolf.com)' }
+        });
+        console.log('[GEOCODE] Full:', geocodeRes.data);
 
-        if (!geocodeRes.data || geocodeRes.data.length === 0) {
-          throw new Error('No location found for ZIP');
-        }
+        if (!geocodeRes.data?.length) throw new Error('No location found');
 
         const result = geocodeRes.data[0];
-        lat = Number(result.lat);
-        lon = Number(result.lon);
+        const lat = Number(result.lat);
+        const lon = Number(result.lon);
         console.log('[GEOCODE] Lat/Lon:', lat, lon);
 
         const parts = result.display_name.split(', ');
-        const city = parts[0] || 'Alpharetta';
-        const state = parts[1] || 'GA';
-        setLocationName(`${city}, ${state}`);
+        setLocationName(`${parts[0] || 'Alpharetta'}, ${parts[1] || 'GA'}`);
 
         // Open-Meteo
         const today = new Date().toISOString().split('T')[0];
         const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
 
-        const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&start_date=${today}&end_date=${tomorrow}&hourly=soil_temperature_0cm,temperature_2m,dewpoint_2m,relative_humidity_2m,wind_speed_10m,cloudcover,precipitation`;
+        const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&start_date=${today}&end_date=${tomorrow}&hourly=temperature_2m,soil_temperature_0cm,dewpoint_2m,relative_humidity_2m,wind_speed_10m,cloudcover,precipitation`;
         const weatherRes = await axios.get(weatherUrl);
-        console.log('[WEATHER] Full response:', weatherRes.data);
+        console.log('[WEATHER] Full:', weatherRes.data);
 
-        if (!weatherRes.data?.hourly || !Array.isArray(weatherRes.data.hourly.temperature_2m)) {
-          console.warn('[WEATHER] Invalid hourly data – falling back to mock');
-          throw new Error('No valid hourly array');
+        const rawHourly = weatherRes.data?.hourly;
+
+        if (!rawHourly || !Array.isArray(rawHourly.temperature_2m) || rawHourly.temperature_2m.length === 0) {
+          console.warn('[WEATHER] Invalid hourly – using mock');
+          throw new Error('No valid hourly data');
         }
 
-        setRealData(weatherRes.data.hourly);
-        console.log('[WEATHER] Real hourly loaded – temp array length:', weatherRes.data.hourly.temperature_2m.length);
+        // Transform to array of objects for easier mapping
+        const transformed = rawHourly.time.map((time: string, i: number) => ({
+          time,
+          temperature_2m: rawHourly.temperature_2m[i],
+          soil_temperature_0cm: rawHourly.soil_temperature_0cm[i],
+          dewpoint_2m: rawHourly.dewpoint_2m[i],
+          relative_humidity_2m: rawHourly.relative_humidity_2m[i],
+          wind_speed_10m: rawHourly.wind_speed_10m[i],
+          cloudcover: rawHourly.cloudcover[i],
+          precipitation: rawHourly.precipitation?.[i] ?? 0,
+        }));
+
+        setHourly(transformed);
+        console.log('[SUCCESS] Transformed hourly array length:', transformed.length);
       } catch (err: any) {
-        console.error('[FETCH ERROR]', err.message, err.response?.data || err.stack);
-        setError('Failed to load real weather – using demo data.');
+        console.error('[ERROR]', err.message, err.stack);
+        setError('Failed to load real data – using demo.');
+        setHourly(mockTempData);
       }
     };
 
     fetchData();
   }, [searchParams]);
 
-  // Force hourlyData to ALWAYS be an array
-  const hourlyData = (() => {
-    if (
-      realData &&
-      realData.hourly &&
-      Array.isArray(realData.hourly.temperature_2m) &&
-      realData.hourly.temperature_2m.length > 0
-    ) {
-      console.log('[DATA] Using REAL hourly data (length:', realData.hourly.temperature_2m.length, ')');
-      return realData.hourly;
-    }
-
-    console.log('[DATA] Falling back to MOCK data');
-    return mockTempData;
-  })();
-
-  // Calculations – guaranteed safe
-  const minTemp = Math.min(...hourlyData.map((d: any) => d.temperature_2m ?? d.air ?? 0));
+  // Calculations – hourly is guaranteed array
+  const minTemp = Math.min(...hourly.map(d => d.temperature_2m ?? d.air ?? 0));
   const minTempF = minTemp * 9/5 + 32;
-  const dewPoint = realData?.hourly?.dewpoint_2m?.[0] ?? 25;
-  const humidity = realData?.hourly?.relative_humidity_2m?.[0] ?? 90;
-  const wind = realData?.hourly?.wind_speed_10m?.[0] ?? 4;
-  const cloud = realData?.hourly?.cloudcover?.[0] ?? 20;
+  const dewPoint = hourly[0]?.dewpoint_2m ?? 25;
+  const humidity = hourly[0]?.relative_humidity_2m ?? 90;
+  const wind = hourly[0]?.wind_speed_10m ?? 4;
+  const cloud = hourly[0]?.cloudcover ?? 20;
 
   let fri = ((4 - minTemp) / 4) * (dewPoint <= 0 ? 1 : 0) * (humidity / 100) * (1 - wind / 20) * (1 - cloud / 100);
   fri = Math.max(0, Math.min(1, fri));
@@ -139,10 +133,11 @@ export default function Dashboard() {
   const coveringNeeded = minTempF < 25;
 
   const sprayWindows = [];
-  for (let i = 0; i < Math.min(24, hourlyData.length); i++) {
-    const tempF = (hourlyData[i].temperature_2m ?? hourlyData[i].air ?? 0) * 9/5 + 32;
-    const windSpeed = hourlyData[i].wind_speed_10m ?? hourlyData[i].wind ?? 5;
-    const precip = hourlyData[i].precipitation ?? hourlyData[i].precip ?? 0;
+  for (let i = 0; i < Math.min(24, hourly.length); i++) {
+    const d = hourly[i];
+    const tempF = (d.temperature_2m ?? d.air ?? 0) * 9/5 + 32;
+    const windSpeed = d.wind_speed_10m ?? 5;
+    const precip = d.precipitation ?? 0;
     if (tempF >= 50 && tempF <= 85 && windSpeed < 10 && precip === 0) {
       sprayWindows.push(`Hour ${i + 1}: Good (Temp: ${Math.round(tempF)}°F, Wind: ${windSpeed} mph)`);
     }
@@ -151,8 +146,8 @@ export default function Dashboard() {
   const highHumidity = humidity > 80;
   const chemRec = highHumidity ? { name: 'Azoxystrobin', conditions: 'High humidity fungi control', buyLink: 'https://example.com/buy' } : null;
 
-  // Chart – safe on array
-  const chartData = hourlyData.slice(0, 24).map((d: any, i: number) => ({
+  // Chart data
+  const chartData = hourly.slice(0, 24).map((d, i) => ({
     time: `${i + 1} hr`,
     air: (d.temperature_2m ?? d.air ?? 0) * 9/5 + 32,
     soil: (d.soil_temperature_0cm ?? d.soil ?? 0) * 9/5 + 32,
@@ -161,7 +156,7 @@ export default function Dashboard() {
   return (
     <div className="pt-28 pb-20 px-4 md:px-8 bg-[#f8fafc] min-h-screen">
       <div className="max-w-7xl mx-auto">
-        {/* Course Header */}
+        {/* Header */}
         <div className="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-slate-200 mb-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-2">
             <div className="flex items-center gap-2">
@@ -198,7 +193,7 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Main Content */}
           <div className="lg:col-span-2 space-y-8">
-            {/* Green Covering Alert */}
+            {/* Covering Alert */}
             {coveringNeeded && (
               <div className="bg-amber-50 border-l-4 border-amber-500 p-6 rounded-r-xl flex items-start gap-4">
                 <div className="bg-amber-500 text-white p-2 rounded-lg">
@@ -274,7 +269,7 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Spray Window */}
+              {/* Spray Scheduler */}
               <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden group hover:shadow-md transition-shadow">
                 <div className="p-8 border-b border-slate-100 flex justify-between items-center">
                   <h3 className="text-lg font-black text-slate-900 flex items-center gap-3">
@@ -305,7 +300,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Chemical Suggestions */}
+            {/* Chemical Recommendations */}
             <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
               <div className="p-8 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-6">
                 <div>
