@@ -8,7 +8,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 export default function Dashboard() {
   const params = useSearchParams();
   const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   const [locationName, setLocationName] = useState('Alpharetta, GA'); // Default
 
   useEffect(() => {
@@ -18,38 +18,45 @@ export default function Dashboard() {
         let lon = params.get('lon');
         const zip = params.get('zip') || '30004';
 
-        let isGPS = false;
+        // Log start for debugging
+        console.log('Starting fetch for zip:', zip);
+
         if (lat && lon) {
-          isGPS = true;
+          setLocationName('Current Location');
         } else {
-          // Geocode zip using Nominatim (OpenStreetMap) for accurate US results
-          const geocodeUrl = `https://nominatim.openstreetmap.org/search?postalcode=${zip}&country=US&format=json&limit=1`;
+          // Use Nominatim (OpenStreetMap) geocoder with US filter (CORS-friendly)
+          const geocodeUrl = `https://nominatim.openstreetmap.org/search?postalcode=${zip}&countrycodes=us&format=json&limit=1`;
+          console.log('Geocode URL:', geocodeUrl);
+
           const geocodeResponse = await axios.get(geocodeUrl);
+          console.log('Geocode Response:', geocodeResponse.data);
+
           if (!geocodeResponse.data || geocodeResponse.data.length === 0) {
-            throw new Error('No location found for the zip code');
+            throw new Error('No location found for this ZIP code');
           }
-          lat = geocodeResponse.data[0].lat;
-          lon = geocodeResponse.data[0].lon;
+
+          lat = parseFloat(geocodeResponse.data[0].lat);
+          lon = parseFloat(geocodeResponse.data[0].lon);
           const displayName = geocodeResponse.data[0].display_name;
           setLocationName(displayName.split(', ').slice(0, 2).join(', ')); // e.g., "Alpharetta, Georgia"
         }
 
-        if (isGPS) {
-          setLocationName('Current Location');
-        }
-
         // Get current date for forecast
         const today = new Date().toISOString().split('T')[0];
-        const tomorrow = new Date(new Date().getTime() + 86400000).toISOString().split('T')[0]; // +1 day
+        const tomorrow = new Date(new Date().getTime() + 86400000).toISOString().split('T')[0];
 
-        // Fetch weather with lat/lon
         const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&start_date=${today}&end_date=${tomorrow}&hourly=soil_temperature_0cm,temperature_2m,dewpoint_2m,relative_humidity_2m,wind_speed_10m,cloudcover,precipitation`;
+        console.log('Weather URL:', weatherUrl);
+
         const weatherResponse = await axios.get(weatherUrl);
+        console.log('Weather data loaded');
         setData(weatherResponse.data.hourly);
       } catch (err) {
-        setError('Failed to fetch data: ' + err.message);
+        console.error('Fetch error:', err);
+        setError('Failed to fetch data: ' + (err.message || 'Unknown network issue'));
       }
     };
+
     fetchData();
   }, [params]);
 
@@ -84,7 +91,7 @@ export default function Dashboard() {
     }
   }
 
-  // Chemical Recs (static for MVP, match to conditions)
+  // Chemical Recs (static for MVP)
   const highHumidity = humidity > 80;
   const chemRec = highHumidity ? { name: 'Azoxystrobin', conditions: 'High humidity fungi control', buyLink: 'https://example.com/buy' } : null;
 
@@ -99,19 +106,23 @@ export default function Dashboard() {
     <main className="min-h-screen bg-[#F8FAF5] p-6">
       <div className="max-w-5xl mx-auto">
         <h1 className="text-3xl font-bold text-primary mb-8">Turf Dashboard - {locationName}</h1>
-        
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Frost Risk Card */}
           <div className="bg-white rounded-3xl shadow-xl p-6">
             <h2 className="text-xl font-semibold mb-4">Frost Risk</h2>
-            <p className={`text-2xl font-bold ${risk === 'High' ? 'text-red-600' : 'text-green-600'}`}>{risk}</p>
+            <p className={`text-2xl font-bold ${risk === 'High' ? 'text-red-600' : 'text-green-600'}`}>
+              {risk}
+            </p>
             <p className="text-gray-600 mt-2">{message}</p>
           </div>
 
           {/* Green Covering Card */}
           <div className="bg-white rounded-3xl shadow-xl p-6">
             <h2 className="text-xl font-semibold mb-4">Green Covering</h2>
-            <p className={`text-2xl font-bold ${coveringNeeded ? 'text-red-600' : 'text-green-600'}`}>{coveringMessage}</p>
+            <p className={`text-2xl font-bold ${coveringNeeded ? 'text-red-600' : 'text-green-600'}`}>
+              {coveringMessage}
+            </p>
           </div>
 
           {/* Spray Scheduler Card */}
@@ -132,7 +143,9 @@ export default function Dashboard() {
             {chemRec ? (
               <div>
                 <p className="text-gray-700">{chemRec.name} for {chemRec.conditions}</p>
-                <a href={chemRec.buyLink} className="text-primary hover:underline mt-2 block">Buy Now</a>
+                <a href={chemRec.buyLink} className="text-primary hover:underline mt-2 block">
+                  Buy Now
+                </a>
               </div>
             ) : (
               <p className="text-gray-600">No recs based on current conditions.</p>
